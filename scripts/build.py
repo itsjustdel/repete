@@ -216,11 +216,15 @@ def build(placeholder: bool) -> None:
             item["notes"] = p["notes"]  # lets the app's edit screen show tu/vous
         sets.setdefault(p["set"], []).append(item)
 
+    # Two ids: app_id covers only the app's own files and versions the service
+    # worker, so adding phrases doesn't make phones offer an app update.
+    # build_id also covers the phrases; the app watches it to spot new ones.
     content_hash = hashlib.sha1()
     for f in sorted(APP_DIR.rglob("*")):
         if f.is_file():
             content_hash.update(f.relative_to(APP_DIR).as_posix().encode())
             content_hash.update(f.read_bytes())
+    app_id = content_hash.hexdigest()[:10]
     content_hash.update(json.dumps(sets, sort_keys=True).encode())
     build_id = content_hash.hexdigest()[:10]
 
@@ -236,12 +240,12 @@ def build(placeholder: bool) -> None:
     (DIST / "data").mkdir(exist_ok=True)
     (DIST / "data" / "phrases.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=1), encoding="utf-8")
 
-    # Stamp the service worker with this build's id and its app-shell file list.
+    # Stamp the service worker with the app's id and its app-shell file list.
     shell = sorted(f.relative_to(APP_DIR).as_posix() for f in APP_DIR.rglob("*")
                    if f.is_file() and f.name != "sw.js")
     sw = DIST / "sw.js"
     sw.write_text(sw.read_text(encoding="utf-8")
-                  .replace("__BUILD_ID__", build_id)
+                  .replace("__BUILD_ID__", app_id)
                   .replace("__APP_FILES__", json.dumps(["./"] + shell)), encoding="utf-8")
 
     size = sum(f.stat().st_size for f in (DIST / "audio").glob("*.mp3"))

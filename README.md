@@ -56,7 +56,7 @@ app/                         the static app (vanilla JS, no build step)
 
 ## Adding phrases from the app
 
-Tap **Add phrases** on the home screen, paste your sentences in English (one per line), give the new set a name and tap **Add**. About a minute later the set is ready to play, with the French and audio. You can also type the French yourself (one line per English line), or type only French and get the English. To add to an existing set, open it with the pencil and tap **Add a phrase to this set**.
+Tap **Add phrases** on the home screen, paste your sentences in English, one per line (about 10 makes a good set, but any number works), optionally name the set, and tap **Add**. Unnamed sets are called "Batch 3" and so on. About a minute later the set is ready to play, with the French and audio. You can also type the French yourself (one line per English line), or type only French and get the English. To add to an existing set, open it with the pencil and tap **Add a phrase to this set**.
 
 Behind the scenes the app commits a row per sentence to `phrases.csv` with the missing language left blank. The workflow asks Claude for the translation (`scripts/translate.py`), commits it back to `phrases.csv`, records the audio and deploys. Each phrase is only translated once, and you can edit the wording in the CSV afterwards.
 

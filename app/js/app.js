@@ -386,10 +386,13 @@ async function viewSet(name) {
 }
 
 // ------------------------------------------------------------------ add / edit a phrase
+// Numbers a new set after the existing ones (including sets still on the way).
+// With no title it's called "Batch <n>".
 function newSetName(title) {
   if (/^\d+[\s._-]/.test(title)) return title;
-  const nums = data.sets.map(s => Number((s.name.match(/^(\d+)/) || [])[1] || 0));
-  return `${String(Math.max(0, ...nums) + 1).padStart(2, '0')} ${title}`;
+  const names = [...data.sets.map(s => s.name), ...pending.map(p => p.set)];
+  const n = Math.max(0, ...names.map(s => Number((s.match(/^(\d+)/) || [])[1] || 0))) + 1;
+  return `${String(n).padStart(2, '0')} ${title || `Batch ${n}`}`;
 }
 
 function findPhrase(id) {
@@ -471,7 +474,7 @@ async function viewPhraseForm(existing, presetSet) {
 
   $view.innerHTML = `${top}
     <section class="panel form">
-      <label class="field"><span>English${editing ? '' : ' <small>One sentence per line. Paste a whole set at once.</small>'}</span>
+      <label class="field"><span>English${editing ? '' : ' <small>One sentence per line. About 10 makes a good set, but any number works.</small>'}</span>
         <textarea id="en" rows="${editing ? 2 : 7}" placeholder="${editing ? '' : 'Where is the station?&#10;I&#39;d like a coffee, please.&#10;What time does it open?'}">${esc(p?.en || '')}</textarea></label>
       <div class="field"><label for="fr">French <small>${editing ? 'Clear it to get a fresh translation from Claude.' : 'Optional. Leave it blank and Claude translates. If you fill it in, one line per English line.'}</small></label>
         <textarea id="fr" rows="${editing ? 2 : 3}" lang="fr">${esc(p?.fr || '')}</textarea>
@@ -485,7 +488,7 @@ async function viewPhraseForm(existing, presetSet) {
           ${names.map(n => `<option value="${esc(n)}"${n === selected ? ' selected' : ''}>${esc(splitSetName(n).title)}</option>`).join('')}
           <option value=""${selected ? '' : ' selected'}>New set…</option>
         </select></label>
-      <input id="newset" placeholder="Name of the new set, e.g. At the café"${selected ? ' hidden' : ''}>
+      <input id="newset" placeholder="Name (optional), e.g. At the café" aria-label="Name of the new set"${selected ? ' hidden' : ''}>
       <button class="btn primary wide" id="save">${editing ? 'Save changes' : 'Add'}</button>
       ${editing ? '<button class="btn wide danger-btn" id="delete">Delete phrase</button>' : ''}
       <p class="form-err" id="err" role="alert"></p>
@@ -505,16 +508,24 @@ async function viewPhraseForm(existing, presetSet) {
     $view.querySelectorAll('[data-reg]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
   });
   $('#retranslate')?.addEventListener('click', () => { $('#fr').value = ''; $('#fr').focus(); });
+  const lines = el => el.value.split('\n').map(s => s.trim().replace(/\s+/g, ' ')).filter(Boolean);
+  if (!editing) {
+    // Live count on the button: "Add 7 sentences".
+    const count = () => {
+      const n = Math.max(lines($('#en')).length, lines($('#fr')).length);
+      $save.textContent = n > 1 ? `Add ${n} sentences` : 'Add';
+    };
+    $('#en').addEventListener('input', count);
+    $('#fr').addEventListener('input', count);
+  }
 
   $save.addEventListener('click', async () => {
-    const lines = el => el.value.split('\n').map(s => s.trim().replace(/\s+/g, ' ')).filter(Boolean);
     const [enLines, frLines] = [lines($('#en')), lines($('#fr'))];
     const en = enLines.join(' '), fr = frLines.join(' ');
-    const set = $set.value || ($newset.value.trim() && newSetName($newset.value.trim()));
+    const set = $set.value || newSetName($newset.value.trim());
     // Goes in the CSV's notes column; blank lets Claude judge from the phrase.
     const notes = register === 'tu' ? 'tu' : register === 'auto' ? '' : 'vous';
     if (!en && !fr) { $err.textContent = 'Type at least one sentence in English (or French).'; return; }
-    if (!set) { $err.textContent = 'Give the new set a name.'; return; }
     if (!editing && enLines.length && frLines.length && enLines.length !== frLines.length) {
       $err.textContent = `There are ${enLines.length} English lines but ${frLines.length} French. Give one French line per English line, or leave the French blank.`;
       return;

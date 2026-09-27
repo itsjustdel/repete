@@ -100,8 +100,8 @@ def read_phrases() -> list[dict]:
                 log(f"warning: phrases.csv line {line_no} skipped until it's translated "
                     f"(scripts/translate.py): {en or fr!r}")
                 continue
-            # Stable id: set + english. Fixing a typo in the French keeps your
-            # flashcard progress; rewording the English starts the card afresh.
+            # Stable id: set + english. The app uses it to address a phrase
+            # (edit links, pending changes).
             pid = hashlib.sha1(f"{st}␟{en}".encode()).hexdigest()[:12]
             if pid in seen:
                 log(f"warning: duplicate phrase on line {line_no} skipped: {en!r}")

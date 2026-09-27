@@ -107,10 +107,13 @@ function findRow(rows, { en, fr, set }) {
   return i;
 }
 
-/** Appends one row. Leave en or fr blank for Claude to translate. notes: '', 'tu' or 'vous'. */
-export function addPhrase(cfg, { en, fr, set, notes }) {
-  return updateCsv(cfg, `Add phrase: ${short(en || fr)}`, rows => {
-    rows.push({ english: en, french: fr, set, notes });
+/** Appends rows in one commit: [{ en, fr, set, notes }]. Leave en or fr blank
+ * for Claude to translate. notes: '', 'tu' or 'vous'. */
+export function addPhrases(cfg, items) {
+  const first = items[0].en || items[0].fr;
+  const message = items.length === 1 ? `Add phrase: ${short(first)}` : `Add ${items.length} phrases to ${items[0].set}`;
+  return updateCsv(cfg, message, rows => {
+    for (const { en, fr, set, notes } of items) rows.push({ english: en, french: fr, set, notes });
   });
 }
 

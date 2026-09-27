@@ -1,8 +1,8 @@
 # Répète: French listen & repeat
 
-A small Progressive Web App for learning French phrases by the *listen and repeat* method. You install it on Android, it keeps playing with the screen locked, and it works offline. Phrases live in a CSV file in this repo. A GitHub Action turns them into audio with Microsoft's neural voices (via [edge-tts](https://github.com/rany2/edge-tts)) and publishes the app to GitHub Pages.
+A small Progressive Web App for learning French passively by *listen and repeat*: give it a set of sentences, then play them on a loop while you work or travel. Start with each English sentence followed by its French; once you follow the French on its own, drop the English. You install it on Android, it keeps playing with the screen locked, and it works offline. Phrases live in a CSV file in this repo. A GitHub Action turns them into audio with Microsoft's neural voices (via [edge-tts](https://github.com/rany2/edge-tts)) and publishes the app to GitHub Pages.
 
-There's no backend and no account. Your flashcard progress and practice time stay on your phone.
+There's no backend, no account, and no scores or streaks.
 
 ## What's in the box
 
@@ -56,16 +56,16 @@ app/                         the static app (vanilla JS, no build step)
 
 ## Adding phrases from the app
 
-Tap **Add a phrase** on the home screen, type what you want to say in English, pick a set and tap **Add phrase**. About a minute later it's in the app with its French and audio. You can also type the French yourself, or type only the French and get the English.
+Tap **Add phrases** on the home screen, paste your sentences in English (one per line), give the new set a name and tap **Add**. About a minute later the set is ready to play, with the French and audio. You can also type the French yourself (one line per English line), or type only French and get the English. To add to an existing set, open it with the pencil and tap **Add a phrase to this set**.
 
-Behind the scenes the app commits a row to `phrases.csv` with the missing language left blank. The workflow asks Claude for the translation (`scripts/translate.py`), commits it back to `phrases.csv`, records the audio and deploys. Each phrase is only translated once, and you can edit the wording in the CSV afterwards.
+Behind the scenes the app commits a row per sentence to `phrases.csv` with the missing language left blank. The workflow asks Claude for the translation (`scripts/translate.py`), commits it back to `phrases.csv`, records the audio and deploys. Each phrase is only translated once, and you can edit the wording in the CSV afterwards.
 
 **One-time setup:**
 
 1. **Claude token for the workflow.** On your computer, install Claude Code (`npm install -g @anthropic-ai/claude-code`) and run `claude setup-token`. Sign in with your Claude Pro/Max account and copy the token. In the repo, go to **Settings → Secrets and variables → Actions → New repository secret**, name it `CLAUDE_CODE_OAUTH_TOKEN` and paste the token. Translations then count towards your plan's usage. With API credits instead, add an `ANTHROPIC_API_KEY` secret.
-2. **GitHub token on your phone.** The first time you open **Add a phrase**, the app walks you through creating a [fine-grained token](https://github.com/settings/personal-access-tokens/new) limited to this repo with **Contents: Read and write**. It stays in that browser's storage only. To remove it, use *About & settings → Forget GitHub token*, or revoke it on GitHub.
+2. **GitHub token on your phone.** The first time you open **Add phrases**, the app walks you through creating a [fine-grained token](https://github.com/settings/personal-access-tokens/new) limited to this repo with **Contents: Read and write**. It stays in that browser's storage only. To remove it, use *About & settings → Forget GitHub token*, or revoke it on GitHub.
 
-**Editing, moving and deleting.** Tap the pencil on a set to see its phrases, then tap one to change the English or French, move it to another set (existing or new), or delete it. To get a fresh translation, clear the French (*Clear and retranslate*) and save. Moving a phrase or rewording its English keeps its flashcard progress on that phone. Changes show as *Updating…* or *Removing…* until the new build is live.
+**Editing, moving and deleting.** Tap the pencil on a set to see its phrases, then tap one to change the English or French, move it to another set (existing or new), or delete it. To get a fresh translation, clear the French (*Clear and retranslate*) and save. Changes show as *Updating…* or *Removing…* until the new build is live.
 
 **Speaking to** picks the register: *Anyone* (vous), *A friend* (tu), or *Let Claude pick*. It's stored in the optional `notes` column, which you can also use for context such as `at the pharmacy`.
 
@@ -84,7 +84,6 @@ Where is the station?,Où est la gare ?,02 Getting around
 - A row whose English starts with `#` is skipped, so you can comment phrases out.
 - Leave the French (or English) blank to have Claude fill it in on the next build.
 - Only new or changed phrases get new audio. Clip filenames are a hash of voice + rate + text, so everything else comes from the cache.
-- Flashcard progress is keyed on *set + English*. Fixing a typo in the French keeps your progress. Rewording the English or moving a phrase to another set starts that card fresh.
 
 The app checks for new phrases every time it opens while online. It then downloads the new audio in the background. Open it once on Wi-Fi before you go offline.
 
@@ -109,27 +108,15 @@ To see every voice: `pip install edge-tts && edge-tts --list-voices | grep -E "f
 
 ### Listening
 
-Pick a set and tap play. The phone can go in your pocket.
+Tap **Play** on a set. The phone can go in your pocket.
 
-- **Stage 1**: English → pause (try saying it in French) → French → pause (repeat) → French again → pause (repeat).
-- **Stage 2**: French only, with a pause after each phrase to repeat it.
-- **Both**: all of stage 1, then all of stage 2.
-- **Pause** sets the length of each gap, and **Loops** sets how many times to go through the set. *Longer pause for longer phrases* adds the phrase's own length to the gap, so long sentences get more time. *Shuffle* randomises the order on each loop. *Show French text* can be turned off to train your ear.
+- **With English**: English → pause → French → pause (repeat it) → French again → pause. Where you start with a new set.
+- **French only**: each French phrase with a pause to repeat it. Switch to this once you follow the French without the English.
+- **Both**: a round with English, then a round of French only.
+
+Each set remembers its own mode. **Repeat** defaults to **∞**, so it plays on a loop until you stop it; step it down for a fixed number of rounds. **Pause** sets the length of each gap. *Longer pause for longer phrases* adds the phrase's own length to the gap. *Shuffle* reorders every round. *Show French text* can be turned off to train your ear.
 
 Lock-screen and headphone buttons work: play/pause, next and previous phrase. Everything plays through a single `<audio>` element, and the pauses are real (silent) audio rather than timers. Android throttles timers when the screen is locked, but a page that's playing media stays alive, so the session keeps going.
-
-### Flashcards
-
-Each phrase gives two cards:
-
-- **French audio → English**: recognition. New cards of this type come first.
-- **English → French**: say it out loud, then reveal and hear it.
-
-Rate each card **Again / Hard / Good / Easy**. Scheduling is SM-2: *Again* resets the card and brings it back a few cards later in the same session. The other buttons push it out to 1 day, 6 days, and then growing intervals. Under each button you can see when the card would come back. Cards due from any set show up on the home screen as **Review N due cards**.
-
-### Streak and minutes
-
-Listening time and flashcard time both count. A day counts towards your streak once you've practised for at least one minute. The streak survives until midnight, so it doesn't reset in the morning before you've practised.
 
 ### Offline
 

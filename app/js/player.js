@@ -8,7 +8,6 @@
 //   * lock-screen / headphone controls (Media Session) stay attached to a
 //     single continuous media session;
 //   * pausing during a gap and resuming just works.
-import { addPractice, flush } from './stats.js';
 
 const EST_CLIP_SECONDS = 2.2;
 
@@ -47,13 +46,14 @@ function shuffled(arr) {
   return a;
 }
 
-// mode: '1' | '2' | 'both'
-export function buildPlan(phrases, { mode, loops, shuffle }) {
+// mode: '1' | '2' | 'both'. loops: 0 means on repeat, so plan one round
+// at a time; `round` numbers it.
+export function buildPlan(phrases, { mode, loops, shuffle }, round = 1) {
   const stages = mode === 'both' ? [1, 2] : [Number(mode)];
   const steps = [];
   let unit = 0;
   for (const stage of stages) {
-    for (let loop = 1; loop <= loops; loop++) {
+    for (let loop = loops ? 1 : round; loop <= (loops || round); loop++) {
       const order = shuffle ? shuffled(phrases) : phrases;
       order.forEach((phrase, pos) => {
         const meta = { unit: unit++, phrase, stage, loop, pos, count: order.length };
@@ -80,7 +80,7 @@ export function estimateMinutes(phraseCount, { mode, loops, pause, scale }) {
   const s1 = 3 * EST_CLIP_SECONDS + 3 * gap;
   const s2 = EST_CLIP_SECONDS + gap;
   const per = mode === '1' ? s1 : mode === '2' ? s2 : s1 + s2;
-  return Math.max(1, Math.round((per * phraseCount * loops) / 60));
+  return Math.max(1, Math.round((per * phraseCount * (loops || 1)) / 60));
 }
 
 // ---------------------------------------------------------------- player
@@ -96,8 +96,8 @@ export class ListenPlayer extends EventTarget {
     this.active = false; // true while the listening session owns the element
     this.finished = false;
     this.lastClipSeconds = EST_CLIP_SECONDS;
-    this.segStart = 0;
     this.switching = false;
+    this.round = 1;
     this.opts = null;
     this.setName = '';
 
@@ -111,14 +111,12 @@ export class ListenPlayer extends EventTarget {
     // audio focus, a Bluetooth disconnect. Keep the UI truthful.
     audio.addEventListener('pause', () => {
       if (!this.active || this.switching || audio.ended || !this.playing) return;
-      this._account();
       this.playing = false;
       this._emit();
     });
     audio.addEventListener('play', () => {
       if (!this.active || this.playing) return;
       this.playing = true;
-      this.segStart = Date.now();
       this._emit();
     });
     this._setupMediaSession();
@@ -132,6 +130,7 @@ export class ListenPlayer extends EventTarget {
     this.setName = setName;
     this.phrases = phrases;
     this.opts = opts; // live object: pause/scale changes apply to the next gap
+    this.round = 1;
     this.steps = buildPlan(phrases, opts);
     this.i = 0;
     this.loaded = -1;
@@ -144,7 +143,6 @@ export class ListenPlayer extends EventTarget {
     this.active = true;
     if (this.finished || this.i >= this.steps.length) { this.i = 0; this.finished = false; this.loaded = -1; }
     this.playing = true;
-    this.segStart = Date.now();
     if (this.loaded === this.i && this.audio.src && !this.audio.ended) {
       this.audio.play().catch(err => this._playFailed(err));
     } else {
@@ -155,10 +153,8 @@ export class ListenPlayer extends EventTarget {
 
   pause() {
     if (!this.playing) return;
-    this._account();
     this.playing = false;
     this.audio.pause();
-    flush();
     this._emit();
   }
 
@@ -166,11 +162,9 @@ export class ListenPlayer extends EventTarget {
 
   stop() {
     this._msKey = null;
-    if (this.playing) this._account();
     this.playing = false;
     if (this.active) this.audio.pause();
     this.active = false;
-    flush();
     if ('mediaSession' in navigator) {
       navigator.mediaSession.metadata = null;
       navigator.mediaSession.playbackState = 'none';
@@ -195,12 +189,12 @@ export class ListenPlayer extends EventTarget {
     const target = s.unit + dir;
     if (target < 0) return this._goto(0);
     const idx = this.steps.findIndex(x => x.unit === target);
-    if (idx === -1) return this._finish();
-    this._goto(idx);
+    if (idx !== -1) return this._goto(idx);
+    if (this._nextRound()) return this._goto(0);
+    this._finish();
   }
 
   _goto(idx) {
-    this._account();
     this.i = idx;
     this.finished = false;
     this.loaded = -1;
@@ -233,31 +227,31 @@ export class ListenPlayer extends EventTarget {
   _onEnded() {
     const s = this.steps[this.i];
     if (s && s.kind === 'clip' && Number.isFinite(this.audio.duration)) this.lastClipSeconds = this.audio.duration;
-    this._account();
     this.i++;
-    if (this.i >= this.steps.length) return this._finish();
+    if (this.i >= this.steps.length) {
+      if (!this._nextRound()) return this._finish();
+      this.i = 0;
+    }
     if (this.playing) this._loadStep();
     this._emit();
   }
 
+  // On repeat: plan the next round (reshuffled if shuffle is on) and keep going.
+  _nextRound() {
+    if (this.opts.loops) return false;
+    this.round++;
+    this.steps = buildPlan(this.phrases, this.opts, this.round);
+    return true;
+  }
+
   _finish() {
-    this._account();
     this.playing = false;
     this.finished = true;
     this.i = this.steps.length;
     this.audio.pause();
-    flush();
     if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
     this._emit();
     this.dispatchEvent(new Event('done'));
-  }
-
-  _account() {
-    if (this.playing && this.segStart) {
-      const now = Date.now();
-      addPractice((now - this.segStart) / 1000);
-      this.segStart = now;
-    }
   }
 
   _emit() {
@@ -294,10 +288,11 @@ export class ListenPlayer extends EventTarget {
     if (this._msKey === key) return; // only once per phrase, avoids flicker
     this._msKey = key;
     const hide = this.opts && !this.opts.showText;
+    const set = this.setName.replace(/^\d+[\s._-]+/, '');
     navigator.mediaSession.metadata = new MediaMetadata({
       title: hide ? `Phrase ${s.pos + 1} of ${s.count}` : s.phrase.fr,
-      artist: hide ? `Stage ${s.stage}` : s.phrase.en,
-      album: `${this.setName} · Stage ${s.stage} · loop ${s.loop}`,
+      artist: hide ? set : s.phrase.en,
+      album: `${set} · round ${s.loop}`,
       artwork: [
         { src: new URL('icons/icon-192.png', location.href).href, sizes: '192x192', type: 'image/png' },
         { src: new URL('icons/icon-512.png', location.href).href, sizes: '512x512', type: 'image/png' },

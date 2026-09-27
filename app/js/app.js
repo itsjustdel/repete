@@ -2,6 +2,7 @@ import { db } from './db.js';
 import { summary, addPractice, flush } from './stats.js';
 import { ListenPlayer, estimateMinutes } from './player.js';
 import { GRADES, newCard, schedule, intervalLabel } from './srs.js';
+import { getGithub, saveGithub, forgetGithub, checkAccess, addPhrase } from './github.js';
 
 const $view = document.getElementById('view');
 const $np = document.getElementById('nowplaying');
@@ -59,6 +60,59 @@ async function loadData() {
   data = await res.json();
 }
 
+// ------------------------------------------------------------------ pending phrases
+// Phrases added from this phone that aren't in a published build yet.
+const PENDING_KEY = 'repete.pending.v1';
+let pending = (() => {
+  try { return JSON.parse(localStorage.getItem(PENDING_KEY) || '[]'); } catch { return []; }
+})();
+const savePending = () => { try { localStorage.setItem(PENDING_KEY, JSON.stringify(pending)); } catch { /* private mode */ } };
+
+// Drops pending phrases that have arrived. Returns how many did.
+function prunePending() {
+  const before = pending.length;
+  pending = pending.filter(p => {
+    const set = findSet(p.set);
+    return !set?.phrases.some(x => (p.en ? x.en === p.en : x.fr === p.fr));
+  });
+  savePending();
+  return before - pending.length;
+}
+
+function pendingHtml() {
+  if (!pending.length) return '';
+  const repo = data.repo || getGithub()?.repo;
+  const items = pending.map(p => {
+    const slow = Date.now() - p.at > 10 * 60 * 1000;
+    const status = slow
+      ? `Taking longer than usual${repo ? ` · <a href="https://github.com/${esc(repo)}/actions" target="_blank" rel="noopener">check GitHub</a>` : ''}`
+      : p.en && p.fr ? 'Recording…' : 'Translating and recording…';
+    return `<li><span class="p-text">${esc(p.en || p.fr)}</span><small>${esc(splitSetName(p.set).title)} · ${status}</small></li>`;
+  }).join('');
+  return `<h3 class="section-title">On the way</h3><section class="panel"><ul class="pending">${items}</ul></section>`;
+}
+
+// While phrases are pending, check for a new build now and then and pull it in.
+let pollTimer = null;
+function pollForBuild() {
+  if (pollTimer || !pending.length) return;
+  pollTimer = setInterval(async () => {
+    if (!pending.length) { clearInterval(pollTimer); pollTimer = null; return; }
+    if (document.visibilityState !== 'visible') return;
+    try {
+      const res = await fetch('data/phrases.json', { cache: 'no-cache' });
+      if (!res.ok) return;
+      const next = await res.json();
+      if (next.build === data.build) return;
+      data = next;
+      const arrived = prunePending();
+      if (arrived) toast(`${arrived} new phrase${arrived === 1 ? ' is' : 's are'} ready.`, null, null, 4000);
+      if (!/^#\/(listen|cards)\//.test(location.hash)) route();
+      syncAudio();
+    } catch { /* offline; try again next tick */ }
+  }, 15000);
+}
+
 async function cardMap() {
   const rows = await db.getAll('cards');
   return new Map(rows.map(r => [r.id, r]));
@@ -84,6 +138,7 @@ async function route() {
   try {
     if (name === 'listen') await viewListen(arg);
     else if (name === 'cards') await viewCards(arg);
+    else if (name === 'add') await viewAdd();
     else await viewHome();
   } catch (err) {
     console.error(err);
@@ -148,6 +203,8 @@ async function viewHome() {
 
     <h3 class="section-title">Sets</h3>
     ${setsHtml}
+    <a class="btn wide" href="#/add">${icon('plus')} Add a phrase</a>
+    ${pendingHtml()}
 
     <footer class="foot">
       <div id="offline-status">${offlineStatusHtml()}</div>
@@ -155,9 +212,16 @@ async function viewHome() {
         <summary>About &amp; settings</summary>
         <p>Voices: ${esc(data.voices.fr)} / ${esc(data.voices.en)}<br>Build ${esc(data.build)} · ${esc(new Date(data.generated).toLocaleString())}</p>
         ${data.placeholderAudio ? '<p><b>This build uses placeholder beeps, not real voices.</b></p>' : ''}
+        ${getGithub() ? `<p>Adding phrases to ${esc(getGithub().repo)} <button class="danger" id="forget">Forget GitHub token</button></p>` : ''}
         <button class="danger" id="reset">Reset flashcard progress</button>
       </details>
     </footer>`;
+
+  $view.querySelector('#forget')?.addEventListener('click', () => {
+    if (!confirm('Forget the GitHub token on this device? You can connect again from Add a phrase.')) return;
+    forgetGithub();
+    route();
+  });
 
   $view.querySelector('#install')?.addEventListener('click', async () => {
     installPrompt.prompt();
@@ -320,6 +384,127 @@ async function viewListen(name) {
 
   renderSettings();
   render();
+}
+
+// ------------------------------------------------------------------ add a phrase
+const LAST_SET_KEY = 'repete.add.lastSet';
+
+function newSetName(title) {
+  if (/^\d+[\s._-]/.test(title)) return title;
+  const nums = data.sets.map(s => Number((s.name.match(/^(\d+)/) || [])[1] || 0));
+  return `${String(Math.max(0, ...nums) + 1).padStart(2, '0')} ${title}`;
+}
+
+async function viewAdd() {
+  player.stop();
+  const top = `
+    <div class="topbar">
+      <a class="icon-btn" href="#/" aria-label="Back">${icon('back')}</a>
+      <h2>Add a phrase</h2>
+    </div>`;
+
+  const gh = getGithub();
+  if (!gh) {
+    const guess = data.repo || (location.hostname.endsWith('.github.io')
+      ? `${location.hostname.split('.')[0]}/${location.pathname.split('/')[1]}` : '');
+    $view.innerHTML = `${top}
+      <section class="panel form">
+        <p>To add phrases from here, the app needs a GitHub token that can edit your phrase list. You only do this once per device.</p>
+        <ol>
+          <li>Open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub → New fine-grained token</a>.</li>
+          <li>Repository access: <b>Only select repositories</b> → your Répète repo.</li>
+          <li>Permissions → Repository → <b>Contents: Read and write</b>.</li>
+          <li>Generate it, copy it and paste it below.</li>
+        </ol>
+        <label class="field"><span>Repository</span><input id="repo" value="${esc(guess)}" placeholder="owner/repo" autocapitalize="off" spellcheck="false"></label>
+        <label class="field"><span>Token</span><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…"></label>
+        <button class="btn primary wide" id="connect">Connect</button>
+        <p class="form-err" id="err" role="alert"></p>
+      </section>`;
+    const $btn = $view.querySelector('#connect');
+    $btn.addEventListener('click', async () => {
+      const cfg = { repo: $view.querySelector('#repo').value.trim(), token: $view.querySelector('#token').value.trim() };
+      const $err = $view.querySelector('#err');
+      if (!/^[\w.-]+\/[\w.-]+$/.test(cfg.repo) || !cfg.token) { $err.textContent = 'Fill in both the repository (owner/repo) and the token.'; return; }
+      $btn.disabled = true; $err.textContent = '';
+      try {
+        await checkAccess(cfg);
+        saveGithub(cfg);
+        route();
+      } catch (err) {
+        $err.textContent = err.message;
+        $btn.disabled = false;
+      }
+    });
+    return;
+  }
+
+  let lastSet = null;
+  try { lastSet = localStorage.getItem(LAST_SET_KEY); } catch { /* private mode */ }
+  const names = data.sets.map(s => s.name);
+  for (const p of pending) if (!names.includes(p.set)) names.push(p.set); // new sets still on the way
+  const selected = names.includes(lastSet) ? lastSet : names[names.length - 1];
+  let register = '';
+
+  $view.innerHTML = `${top}
+    <section class="panel form">
+      <label class="field"><span>English</span>
+        <textarea id="en" rows="2" placeholder="What do you want to be able to say?"></textarea></label>
+      <label class="field"><span>French <small>Optional. Leave it blank and Claude translates it.</small></span>
+        <textarea id="fr" rows="2" lang="fr"></textarea></label>
+      <div class="field"><span>Speaking to</span>
+        <div class="seg" role="group" aria-label="Formality">
+          <button type="button" data-reg="" aria-pressed="true">Anyone<small>vous</small></button>
+          <button type="button" data-reg="tu">A friend<small>tu</small></button>
+          <button type="button" data-reg="auto">Let Claude<small>pick</small></button>
+        </div></div>
+      <label class="field"><span>Set</span>
+        <select id="set">
+          ${names.map(n => `<option value="${esc(n)}"${n === selected ? ' selected' : ''}>${esc(splitSetName(n).title)}</option>`).join('')}
+          <option value="">New set…</option>
+        </select></label>
+      <input id="newset" placeholder="Name of the new set" hidden>
+      <button class="btn primary wide" id="add">Add phrase</button>
+      <p class="form-err" id="err" role="alert"></p>
+      <p class="hint">Translating and recording takes about a minute. You can keep adding phrases meanwhile.</p>
+    </section>
+    <div id="pending">${pendingHtml()}</div>`;
+
+  const $ = sel => $view.querySelector(sel);
+  const $set = $('#set'), $newset = $('#newset'), $btn = $('#add'), $err = $('#err');
+  $set.addEventListener('change', () => { $newset.hidden = $set.value !== ''; if (!$newset.hidden) $newset.focus(); });
+  $view.querySelector('.seg').addEventListener('click', e => {
+    const b = e.target.closest('[data-reg]');
+    if (!b) return;
+    register = b.dataset.reg;
+    $view.querySelectorAll('[data-reg]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  });
+
+  $btn.addEventListener('click', async () => {
+    const en = $('#en').value.trim().replace(/\s+/g, ' ');
+    const fr = $('#fr').value.trim().replace(/\s+/g, ' ');
+    const set = $set.value || ($newset.value.trim() && newSetName($newset.value.trim()));
+    if (!en && !fr) { $err.textContent = 'Type the phrase in English (or French).'; return; }
+    if (!set) { $err.textContent = 'Give the new set a name.'; return; }
+    // Goes in the CSV's notes column; blank lets Claude judge from the phrase.
+    const notes = register === 'tu' ? 'tu' : register === 'auto' ? '' : 'vous';
+    $btn.disabled = true; $err.textContent = '';
+    try {
+      await addPhrase(gh, { en, fr, set, notes });
+      pending.push({ en, fr, set, at: Date.now() });
+      savePending();
+      try { localStorage.setItem(LAST_SET_KEY, set); } catch { /* private mode */ }
+      toast('Added. It will appear in about a minute.', null, null, 3000);
+      $('#en').value = ''; $('#fr').value = '';
+      if (!$set.value) route(); // re-render so the new set is in the list
+      else { $('#pending').innerHTML = pendingHtml(); $('#en').focus(); }
+      pollForBuild();
+    } catch (err) {
+      $err.textContent = err.message;
+    } finally {
+      $btn.disabled = false;
+    }
+  });
 }
 
 // ------------------------------------------------------------------ now playing bar
@@ -554,8 +739,10 @@ addEventListener('beforeinstallprompt', e => {
     $view.innerHTML = `<p class="error">Couldn't load phrases. Connect to the internet once so the app can save them for offline use.<br><small>${esc(err.message)}</small></p>`;
     return;
   }
+  prunePending();
   addEventListener('hashchange', route);
   await route();
+  pollForBuild();
   navigator.storage?.persist?.().catch(() => {});
   syncAudio();
 })();

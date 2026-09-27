@@ -6,7 +6,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: read
+  contents: write # to commit Claude's translations back to phrases.csv
   pages: write
   id-token: write
 
@@ -29,6 +29,27 @@ jobs:
 
       - name: Install edge-tts
         run: pip install -r requirements.txt
+
+      # Phrases added from the app arrive with only one language filled in.
+      - name: Translate new phrases with Claude
+        run: python scripts/translate.py
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      # Save the translations so each phrase is only translated once. Pushes made
+      # with GITHUB_TOKEN don't start another run. If a newer phrase landed
+      # meanwhile, its own run will translate again, so a failed push is only a warning.
+      - name: Commit translations
+        run: |
+          git diff --quiet phrases.csv && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Translate new phrases" phrases.csv
+          if ! { git pull --rebase origin main && git push origin HEAD:main; }; then
+            git rebase --abort 2>/dev/null || true
+            echo "::warning::Couldn't push the translations; the next run will redo them."
+          fi
 
       # Restore the most recent audio cache. Clip filenames are content hashes,
       # so only new or changed phrases are sent to the TTS service.

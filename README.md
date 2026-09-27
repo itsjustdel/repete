@@ -7,9 +7,10 @@ There's no backend and no account. Your flashcard progress and practice time sta
 ## What's in the box
 
 ```
-phrases.csv                  your phrases: english, french, set
+phrases.csv                  your phrases: english, french, set, notes (optional)
 tts.config.json              voices and speaking rate
 requirements.txt             edge-tts
+scripts/translate.py         fills in missing English or French with Claude
 scripts/build.py             generates audio, writes the manifest, assembles dist/
 scripts/make_icons.py        regenerates the app icons (only if you want to restyle them)
 .github/workflows/deploy.yml build + deploy on every push to main
@@ -37,7 +38,7 @@ app/                         the static app (vanilla JS, no build step)
 3. **Check Actions is allowed.**
    Repo → **Settings → Actions → General**:
    - *Actions permissions*: "Allow all actions and reusable workflows", or at least allow actions created by GitHub.
-   - *Workflow permissions* can stay on the default read-only setting. The workflow asks for exactly what it needs itself (`pages: write`, `id-token: write`).
+   - *Workflow permissions* can stay on the default read-only setting. The workflow asks for exactly what it needs itself (`contents: write` to save translations, `pages: write`, `id-token: write`).
 
 4. **Run it.** The push in step 1 already triggered a run. If it failed because Pages wasn't enabled yet, open the **Actions** tab → *Build audio & deploy* → **Run workflow**. The first run takes about a minute. The site URL appears in the deploy job and under Settings → Pages:
 
@@ -53,7 +54,20 @@ app/                         the static app (vanilla JS, no build step)
 
 **For reliable locked-screen playback:** some phones (Samsung, Xiaomi, OnePlus…) kill background audio aggressively. If playback stops after a few minutes with the screen off, go to Android **Settings → Apps → Chrome → Battery** and choose **Unrestricted**. On Samsung, also take Chrome off the "Sleeping apps" list.
 
-## Adding phrases
+## Adding phrases from the app
+
+Tap **Add a phrase** on the home screen, type what you want to say in English, pick a set and tap **Add phrase**. About a minute later it's in the app with its French and audio. You can also type the French yourself, or type only the French and get the English.
+
+Behind the scenes the app commits a row to `phrases.csv` with the missing language left blank. The workflow asks Claude for the translation (`scripts/translate.py`), commits it back to `phrases.csv`, records the audio and deploys. Each phrase is only translated once, and you can edit the wording in the CSV afterwards.
+
+**One-time setup:**
+
+1. **Claude token for the workflow.** On your computer, install Claude Code (`npm install -g @anthropic-ai/claude-code`) and run `claude setup-token`. Sign in with your Claude Pro/Max account and copy the token. In the repo, go to **Settings → Secrets and variables → Actions → New repository secret**, name it `CLAUDE_CODE_OAUTH_TOKEN` and paste the token. Translations then count towards your plan's usage. With API credits instead, add an `ANTHROPIC_API_KEY` secret.
+2. **GitHub token on your phone.** The first time you open **Add a phrase**, the app walks you through creating a [fine-grained token](https://github.com/settings/personal-access-tokens/new) limited to this repo with **Contents: Read and write**. It stays in that browser's storage only. To remove it, use *About & settings → Forget GitHub token*, or revoke it on GitHub.
+
+**Speaking to** picks the register: *Anyone* (vous), *A friend* (tu), or *Let Claude pick*. It's stored in the optional `notes` column, which you can also use for context such as `at the pharmacy`.
+
+## Adding phrases by hand
 
 Edit `phrases.csv`. The GitHub web editor works fine from your phone. Commit, and about a minute later the new phrases are live.
 
@@ -66,6 +80,7 @@ Where is the station?,Où est la gare ?,02 Getting around
 - Quote any field that contains a comma.
 - **Sets** are grouped by name, in order of first appearance. A leading number (`01 `, `02 `) becomes the badge on the set card, and the rest is its title.
 - A row whose English starts with `#` is skipped, so you can comment phrases out.
+- Leave the French (or English) blank to have Claude fill it in on the next build.
 - Only new or changed phrases get new audio. Clip filenames are a hash of voice + rate + text, so everything else comes from the cache.
 - Flashcard progress is keyed on *set + English*. Fixing a typo in the French keeps your progress. Rewording the English or moving a phrase to another set starts that card fresh.
 
@@ -131,6 +146,7 @@ Service workers need `localhost` or HTTPS. To test on a phone, use the deployed 
 ## Troubleshooting
 
 - **Action fails with `403` / `WSServerHandshakeError` from edge-tts.** Microsoft changes the endpoint now and then, and edge-tts usually ships a fix within days. Bump the version in `requirements.txt` (for example `edge-tts>=7.3,<8`) and push again.
+- **A phrase added from the app never shows up.** Check the Actions tab. *Translate new phrases* fails if the `CLAUDE_CODE_OAUTH_TOKEN` secret is missing or expired; run `claude setup-token` again and update the secret.
 - **Site 404s.** Check Settings → Pages says *Source: GitHub Actions*, and that the deploy job succeeded.
 - **Audio regenerated even though nothing changed.** GitHub evicts Actions caches that go unused for 7 days. Everything is regenerated automatically, which takes about a minute.
 - **Progress disappeared.** Progress lives in the browser's storage for the site. Clearing Chrome's site data, or uninstalling and reinstalling in some cases, wipes it. The app asks Chrome for persistent storage to make eviction unlikely.
@@ -138,4 +154,4 @@ Service workers need `localhost` or HTTPS. To test on a phone, use the deployed 
 
 ## Costs
 
-None. GitHub Actions is free for public repos, and a private repo on a free account gets 2,000 minutes a month; each build takes about a minute. GitHub Pages is free for public repos. edge-tts uses the free Edge read-aloud voices and needs no API key.
+None. GitHub Actions is free for public repos, and a private repo on a free account gets 2,000 minutes a month; each build takes about a minute. GitHub Pages is free for public repos. edge-tts uses the free Edge read-aloud voices and needs no API key. Translations of phrases added from the app use your Claude plan (a few seconds per batch).

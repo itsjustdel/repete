@@ -95,7 +95,10 @@ def read_phrases() -> list[dict]:
             if en.startswith("#"):
                 continue  # allow commented-out rows
             if not en or not fr:
-                fail(f"phrases.csv line {line_no}: both english and french are required")
+                # A phrase just added from the app; it appears once translated.
+                log(f"warning: phrases.csv line {line_no} skipped until it's translated "
+                    f"(scripts/translate.py): {en or fr!r}")
+                continue
             # Stable id: set + english. Fixing a typo in the French keeps your
             # flashcard progress; rewording the English starts the card afresh.
             pid = hashlib.sha1(f"{st}␟{en}".encode()).hexdigest()[:12]
@@ -223,6 +226,8 @@ def build(placeholder: bool) -> None:
         "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "voices": {"fr": cfg["french"]["voice"], "en": cfg["english"]["voice"]},
         "placeholderAudio": placeholder,
+        # Lets the app's "Add phrase" screen commit to this repo's phrases.csv.
+        "repo": os.environ.get("GITHUB_REPOSITORY", ""),
         "sets": [{"name": name, "phrases": items} for name, items in sets.items()],
     }
     (DIST / "data").mkdir(exist_ok=True)

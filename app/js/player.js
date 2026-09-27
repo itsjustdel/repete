@@ -10,6 +10,8 @@
 //   * pausing during a gap and resuming just works.
 
 const EST_CLIP_SECONDS = 2.2;
+// Gap between the English and its French: just enough to separate them.
+const BRIDGE_SECONDS = 0.7;
 
 // ---------------------------------------------------------------- silence
 const silenceCache = new Map();
@@ -77,7 +79,7 @@ export function buildPlan(phrases, { mode, loops, shuffle }, round = 1) {
 
 export function estimateMinutes(phraseCount, { mode, loops, pause, scale }) {
   const gap = pause + (scale ? EST_CLIP_SECONDS : 0);
-  const s1 = 3 * EST_CLIP_SECONDS + 3 * gap;
+  const s1 = 3 * EST_CLIP_SECONDS + BRIDGE_SECONDS + 2 * gap;
   const s2 = EST_CLIP_SECONDS + gap;
   const per = mode === '1' ? s1 : mode === '2' ? s2 : s1 + s2;
   return Math.max(1, Math.round((per * phraseCount * (loops || 1)) / 60));
@@ -207,7 +209,7 @@ export class ListenPlayer extends EventTarget {
     if (!s) return this._finish();
     const src = s.kind === 'clip'
       ? this.audioUrl(s.lang === 'fr' ? s.phrase.frAudio : s.phrase.enAudio)
-      : silenceUrl(this.opts.pause + (this.opts.scale ? this.lastClipSeconds : 0));
+      : silenceUrl(s.purpose === 'think' ? BRIDGE_SECONDS : this.opts.pause + (this.opts.scale ? this.lastClipSeconds : 0));
     this.loaded = this.i;
     this.switching = true;
     this.audio.src = src;

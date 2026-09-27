@@ -110,11 +110,11 @@ To see every voice: `pip install edge-tts && edge-tts --list-voices | grep -E "f
 
 Tap **Play** on a set. The phone can go in your pocket.
 
-- **With English**: English → pause → French → pause (repeat it) → French again → pause. Where you start with a new set.
+- **With English**: English → French straight after → pause → French again → pause. Where you start with a new set.
 - **French only**: each French phrase with a pause to repeat it. Switch to this once you follow the French without the English.
 - **Both**: a round with English, then a round of French only.
 
-Each set remembers its own mode. **Repeat** defaults to **∞**, so it plays on a loop until you stop it; step it down for a fixed number of rounds. **Pause** sets the length of each gap. *Longer pause for longer phrases* adds the phrase's own length to the gap. *Shuffle* reorders every round. *Show French text* can be turned off to train your ear.
+Each set remembers its own mode. **Repeat** defaults to **∞**, so it plays on a loop until you stop it; step it down for a fixed number of rounds. **Pause** sets the gap after each French phrase (2 s by default). *Longer pause for longer phrases* adds the phrase's own length to the gap. *Shuffle* reorders every round. *Show French text* can be turned off to train your ear.
 
 Lock-screen and headphone buttons work: play/pause, next and previous phrase. Everything plays through a single `<audio>` element, and the pauses are real (silent) audio rather than timers. Android throttles timers when the screen is locked, but a page that's playing media stays alive, so the session keeps going.
 

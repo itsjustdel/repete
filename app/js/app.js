@@ -34,13 +34,19 @@ function toast(msg, actionLabel, onAction, ms = 0) {
 }
 
 // ------------------------------------------------------------------ prefs (listening settings)
-const PREFS_KEY = 'repete.listen.v1';
+const PREFS_KEY = 'repete.listen.v2';
 // loops: 0 = play on repeat until stopped. modes: per set, '1' (with English),
 // '2' (French only) or 'both'; `mode` is the one for the set that's loaded.
-const DEFAULT_PREFS = { mode: '1', modes: {}, pause: 3, loops: 0, scale: true, shuffle: false, showText: true };
+// pause: the gap after each French phrase (the English→French gap is fixed).
+const DEFAULT_PREFS = { mode: '1', modes: {}, pause: 2, loops: 0, scale: false, shuffle: false, showText: true };
 const prefs = (() => {
-  try { return { ...DEFAULT_PREFS, ...JSON.parse(localStorage.getItem(PREFS_KEY) || '{}') }; }
-  catch { return { ...DEFAULT_PREFS }; }
+  try {
+    const saved = localStorage.getItem(PREFS_KEY);
+    if (saved) return { ...DEFAULT_PREFS, ...JSON.parse(saved) };
+    // v1 had longer, quiz-style pauses; keep only the per-set modes from it.
+    const old = JSON.parse(localStorage.getItem('repete.listen.v1') || '{}');
+    return { ...DEFAULT_PREFS, modes: old.modes || {} };
+  } catch { return { ...DEFAULT_PREFS }; }
 })();
 const savePrefs = () => { try { localStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch { /* private mode */ } };
 
@@ -236,7 +242,7 @@ async function viewListen(name) {
         ${Object.entries(MODES).map(([k, m]) => `<button data-mode="${k}">${m.label}<small>${m.sub}</small></button>`).join('')}
       </div>
       <p class="hint">Start with English. Once you follow the French without it, switch to French only.</p>
-      <div class="row"><span>Pause<small>Time to repeat</small></span>
+      <div class="row"><span>Pause<small>After each French phrase</small></span>
         <div class="stepper"><button data-step="pause" data-d="-0.5" aria-label="Shorter pause">−</button><output id="pause-v"></output><button data-step="pause" data-d="0.5" aria-label="Longer pause">+</button></div>
       </div>
       <div class="row"><span>Repeat<small>Times through the set</small></span>

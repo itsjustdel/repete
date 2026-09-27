@@ -1,0 +1,71 @@
+name: Build audio & deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deployment at a time; a newer push waits rather than cancelling mid-deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install edge-tts
+        run: pip install -r requirements.txt
+
+      # Restore the most recent audio cache. Clip filenames are content hashes,
+      # so only new or changed phrases are sent to the TTS service.
+      - name: Restore audio cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .audio-cache
+          key: tts-audio-${{ hashFiles('phrases.csv', 'tts.config.json') }}
+          restore-keys: tts-audio-
+
+      - name: Generate audio and build site
+        run: python scripts/build.py
+        env:
+          # Optional overrides: Settings → Secrets and variables → Actions → Variables
+          FR_VOICE: ${{ vars.FR_VOICE }}
+          FR_RATE: ${{ vars.FR_RATE }}
+          EN_VOICE: ${{ vars.EN_VOICE }}
+          EN_RATE: ${{ vars.EN_RATE }}
+
+      - name: Save audio cache
+        uses: actions/cache/save@v4
+        with:
+          path: .audio-cache
+          key: tts-audio-${{ hashFiles('phrases.csv', 'tts.config.json') }}-${{ github.run_id }}
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

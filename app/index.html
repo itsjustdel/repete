@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5efe4" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#11151d" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="Listen-and-repeat French practice that works offline.">
+  <title>Répète</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/app.css">
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <!-- The one and only audio element. Everything (phrases, pauses, flashcard
+       audio) plays through it so Android treats the session as one media
+       stream and keeps it alive with the screen locked. -->
+  <audio id="audio" preload="auto"></audio>
+
+  <main id="view" class="view" tabindex="-1">
+    <div class="loading">Chargement…</div>
+  </main>
+
+  <button id="nowplaying" class="nowplaying" hidden></button>
+  <div id="toast" class="toast" role="status" hidden></div>
+
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-play" viewBox="0 0 24 24"><path fill="currentColor" d="M8 5.5v13a1 1 0 0 0 1.5.86l10.4-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5Z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><rect fill="currentColor" x="6" y="5" width="4.2" height="14" rx="1.2"/><rect fill="currentColor" x="13.8" y="5" width="4.2" height="14" rx="1.2"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path fill="currentColor" d="M5 6.3v11.4a1 1 0 0 0 1.55.83L15 12.83a1 1 0 0 0 0-1.66L6.55 5.47A1 1 0 0 0 5 6.3Z"/><rect fill="currentColor" x="16.5" y="5" width="2.6" height="14" rx="1.2"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><g transform="matrix(-1 0 0 1 24 0)"><path fill="currentColor" d="M5 6.3v11.4a1 1 0 0 0 1.55.83L15 12.83a1 1 0 0 0 0-1.66L6.55 5.47A1 1 0 0 0 5 6.3Z"/><rect fill="currentColor" x="16.5" y="5" width="2.6" height="14" rx="1.2"/></g></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M15 5l-7 7 7 7"/></symbol>
+    <symbol id="i-headphones" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect fill="currentColor" x="3" y="13.5" width="5" height="7" rx="2"/><rect fill="currentColor" x="16" y="13.5" width="5" height="7" rx="2"/></symbol>
+    <symbol id="i-cards" viewBox="0 0 24 24"><rect fill="none" stroke="currentColor" stroke-width="2" x="3.5" y="6.5" width="13" height="14" rx="2.5"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M8 3.5h8.5a4 4 0 0 1 4 4V16"/></symbol>
+    <symbol id="i-speaker" viewBox="0 0 24 24"><path fill="currentColor" d="M4 9.5v5a1 1 0 0 0 1 1h3l4.4 3.7a1 1 0 0 0 1.6-.8V5.6a1 1 0 0 0-1.6-.8L8 8.5H5a1 1 0 0 0-1 1Z"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M17 8.5a5 5 0 0 1 0 7M19.6 6a8.5 8.5 0 0 1 0 12"/></symbol>
+    <symbol id="i-flame" viewBox="0 0 24 24"><path fill="currentColor" d="M12.6 2.3c.4 3-1.1 4.6-2.7 6.3C8.3 10.3 6.5 12.1 6.5 15a5.5 5.5 0 0 0 11 0c0-2.1-.9-3.7-1.8-4.9-.2 1.3-.9 2.3-2 2.8.6-3.9-.3-7.6-1.1-10.6Z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  </svg>
+</body>
+</html>

@@ -1,0 +1,5 @@
+dist/
+.audio-cache/
+.audio-cache-placeholder/
+__pycache__/
+.DS_Store

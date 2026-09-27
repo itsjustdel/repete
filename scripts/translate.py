@@ -87,10 +87,23 @@ def ask_claude(items: list[dict]) -> dict[int, str]:
     prompt = PROMPT + json.dumps(items, ensure_ascii=False, indent=1)
     cmd = [npx, "-y", "@anthropic-ai/claude-code", "-p", "--output-format", "json",
            "--model", MODEL, "--max-turns", "1"]
+    # Tokens copied from a terminal often pick up a line break where it wrapped.
+    env = dict(os.environ)
+    for var in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"):
+        if env.get(var):
+            env[var] = re.sub(r"\s+", "", env[var])
     log(f"Asking Claude ({MODEL}) to translate {len(items)} phrase(s)")
-    proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8", timeout=300)
+    proc = subprocess.run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8", timeout=300, env=env)
     if proc.returncode != 0:
-        fail(f"Claude CLI failed (exit {proc.returncode}): {(proc.stderr or proc.stdout).strip()[-800:]}")
+        try:
+            reason = json.loads(proc.stdout).get("result")
+        except (json.JSONDecodeError, AttributeError):
+            reason = None
+        reason = reason or (proc.stderr or proc.stdout).strip()[-800:]
+        if "401" in reason or "authenticate" in reason.lower():
+            reason += (" The CLAUDE_CODE_OAUTH_TOKEN secret is wrong or expired: run `claude setup-token` "
+                       "again and update the secret.")
+        fail(f"Claude CLI failed (exit {proc.returncode}): {reason}")
 
     try:
         envelope = json.loads(proc.stdout)

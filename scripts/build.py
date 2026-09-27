@@ -90,6 +90,7 @@ def read_phrases() -> list[dict]:
             en = (raw.get(headers["english"]) or "").strip()
             fr = (raw.get(headers["french"]) or "").strip()
             st = (raw.get(headers["set"]) or "").strip() or "Unsorted"
+            notes = (raw.get(headers["notes"]) or "").strip() if "notes" in headers else ""
             if not en and not fr:
                 continue
             if en.startswith("#"):
@@ -106,7 +107,7 @@ def read_phrases() -> list[dict]:
                 log(f"warning: duplicate phrase on line {line_no} skipped: {en!r}")
                 continue
             seen.add(pid)
-            rows.append({"id": pid, "en": en, "fr": fr, "set": st})
+            rows.append({"id": pid, "en": en, "fr": fr, "set": st, "notes": notes})
     if not rows:
         fail("phrases.csv has no phrases")
     return rows
@@ -210,8 +211,10 @@ def build(placeholder: bool) -> None:
 
     sets: dict[str, list] = {}
     for p in phrases:
-        sets.setdefault(p["set"], []).append(
-            {"id": p["id"], "en": p["en"], "fr": p["fr"], "enAudio": p["enAudio"], "frAudio": p["frAudio"]})
+        item = {"id": p["id"], "en": p["en"], "fr": p["fr"], "enAudio": p["enAudio"], "frAudio": p["frAudio"]}
+        if p["notes"]:
+            item["notes"] = p["notes"]  # lets the app's edit screen show tu/vous
+        sets.setdefault(p["set"], []).append(item)
 
     content_hash = hashlib.sha1()
     for f in sorted(APP_DIR.rglob("*")):

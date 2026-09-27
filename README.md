@@ -65,6 +65,8 @@ Behind the scenes the app commits a row to `phrases.csv` with the missing langua
 1. **Claude token for the workflow.** On your computer, install Claude Code (`npm install -g @anthropic-ai/claude-code`) and run `claude setup-token`. Sign in with your Claude Pro/Max account and copy the token. In the repo, go to **Settings → Secrets and variables → Actions → New repository secret**, name it `CLAUDE_CODE_OAUTH_TOKEN` and paste the token. Translations then count towards your plan's usage. With API credits instead, add an `ANTHROPIC_API_KEY` secret.
 2. **GitHub token on your phone.** The first time you open **Add a phrase**, the app walks you through creating a [fine-grained token](https://github.com/settings/personal-access-tokens/new) limited to this repo with **Contents: Read and write**. It stays in that browser's storage only. To remove it, use *About & settings → Forget GitHub token*, or revoke it on GitHub.
 
+**Editing, moving and deleting.** Tap the pencil on a set to see its phrases, then tap one to change the English or French, move it to another set (existing or new), or delete it. To get a fresh translation, clear the French (*Clear and retranslate*) and save. Moving a phrase or rewording its English keeps its flashcard progress on that phone. Changes show as *Updating…* or *Removing…* until the new build is live.
+
 **Speaking to** picks the register: *Anyone* (vous), *A friend* (tu), or *Let Claude pick*. It's stored in the optional `notes` column, which you can also use for context such as `at the pharmacy`.
 
 ## Adding phrases by hand

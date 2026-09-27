@@ -2,7 +2,7 @@ import { db } from './db.js';
 import { summary, addPractice, flush } from './stats.js';
 import { ListenPlayer, estimateMinutes } from './player.js';
 import { GRADES, newCard, schedule, intervalLabel } from './srs.js';
-import { getGithub, saveGithub, forgetGithub, checkAccess, addPhrase } from './github.js';
+import { getGithub, saveGithub, forgetGithub, checkAccess, addPhrase, editPhrase, deletePhrase } from './github.js';
 
 const $view = document.getElementById('view');
 const $np = document.getElementById('nowplaying');
@@ -60,39 +60,54 @@ async function loadData() {
   data = await res.json();
 }
 
-// ------------------------------------------------------------------ pending phrases
-// Phrases added from this phone that aren't in a published build yet.
+// ------------------------------------------------------------------ pending changes
+// Phrases added, edited or deleted from this phone that aren't in a published
+// build yet: { op: 'add'|'edit'|'delete', en, fr, set, from?, build, at }.
+// `from` is the id of the phrase an edit or delete applies to, and `build`
+// the build that was live when the change was made.
 const PENDING_KEY = 'repete.pending.v1';
 let pending = (() => {
   try { return JSON.parse(localStorage.getItem(PENDING_KEY) || '[]'); } catch { return []; }
 })();
 const savePending = () => { try { localStorage.setItem(PENDING_KEY, JSON.stringify(pending)); } catch { /* private mode */ } };
+const pendingFor = id => pending.find(p => p.from === id);
 
-// Drops pending phrases that have arrived. Returns how many did.
+function addPending(change) {
+  pending.push({ ...change, build: data.build, at: Date.now() });
+  savePending();
+  pollForBuild();
+}
+
+// Drops changes that a newer build has picked up. Returns how many did.
 function prunePending() {
   const before = pending.length;
+  const present = p => !!findSet(p.set)?.phrases.some(x => (!p.en || x.en === p.en) && (!p.fr || x.fr === p.fr));
   pending = pending.filter(p => {
-    const set = findSet(p.set);
-    return !set?.phrases.some(x => (p.en ? x.en === p.en : x.fr === p.fr));
+    if (Date.now() - p.at > 60 * 60 * 1000) return false; // give up on it after an hour
+    if (p.build && p.build === data.build) return true;
+    return p.op === 'delete' ? present(p) : !present(p);
   });
   savePending();
   return before - pending.length;
 }
 
-function pendingHtml() {
-  if (!pending.length) return '';
+function pendingHtml(setName) {
+  const list = pending.filter(p => !setName || p.set === setName);
+  if (!list.length) return '';
   const repo = data.repo || getGithub()?.repo;
-  const items = pending.map(p => {
+  const items = list.map(p => {
     const slow = Date.now() - p.at > 10 * 60 * 1000;
     const status = slow
       ? `Taking longer than usual${repo ? ` · <a href="https://github.com/${esc(repo)}/actions" target="_blank" rel="noopener">check GitHub</a>` : ''}`
-      : p.en && p.fr ? 'Recording…' : 'Translating and recording…';
+      : p.op === 'delete' ? 'Removing…'
+      : p.en && p.fr ? (p.op === 'edit' ? 'Updating…' : 'Recording…')
+      : 'Translating and recording…';
     return `<li><span class="p-text">${esc(p.en || p.fr)}</span><small>${esc(splitSetName(p.set).title)} · ${status}</small></li>`;
   }).join('');
   return `<h3 class="section-title">On the way</h3><section class="panel"><ul class="pending">${items}</ul></section>`;
 }
 
-// While phrases are pending, check for a new build now and then and pull it in.
+// While changes are pending, check for a new build now and then and pull it in.
 let pollTimer = null;
 function pollForBuild() {
   if (pollTimer || !pending.length) return;
@@ -106,11 +121,29 @@ function pollForBuild() {
       if (next.build === data.build) return;
       data = next;
       const arrived = prunePending();
-      if (arrived) toast(`${arrived} new phrase${arrived === 1 ? ' is' : 's are'} ready.`, null, null, 4000);
-      if (!/^#\/(listen|cards)\//.test(location.hash)) route();
+      if (arrived) toast(`${arrived} change${arrived === 1 ? ' is' : 's are'} live.`, null, null, 4000);
+      if (!/^#\/(listen|cards|add|edit)\//.test(location.hash) && location.hash !== '#/add') route();
       syncAudio();
     } catch { /* offline; try again next tick */ }
   }, 15000);
+}
+
+// Flashcard progress is keyed on the phrase id (a hash of set + English, see
+// scripts/build.py). When an edit changes either, carry the progress over.
+async function phraseId(set, en) {
+  const hash = await crypto.subtle.digest('SHA-1', new TextEncoder().encode(`${set}␟${en}`));
+  return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 12);
+}
+async function moveProgress(oldId, set, en) {
+  if (!en || !crypto.subtle) return;
+  const newId = await phraseId(set, en);
+  if (newId === oldId) return;
+  for (const dir of DIRS) {
+    const card = await db.get('cards', `${oldId}:${dir}`);
+    if (!card) continue;
+    await db.put('cards', { ...card, id: `${newId}:${dir}` });
+    await db.delete('cards', `${oldId}:${dir}`);
+  }
 }
 
 async function cardMap() {
@@ -138,7 +171,9 @@ async function route() {
   try {
     if (name === 'listen') await viewListen(arg);
     else if (name === 'cards') await viewCards(arg);
-    else if (name === 'add') await viewAdd();
+    else if (name === 'add') await viewAdd(arg || null);
+    else if (name === 'set') await viewSet(arg);
+    else if (name === 'edit') await viewEdit(arg);
     else await viewHome();
   } catch (err) {
     console.error(err);
@@ -166,7 +201,8 @@ async function viewHome() {
       <article class="panel set">
         <div class="set-head">
           <div class="set-no">${esc(no)}</div>
-          <div><div class="set-name">${esc(title)}</div><div class="set-meta">${bits.join(' · ')}</div></div>
+          <div class="set-title"><div class="set-name">${esc(title)}</div><div class="set-meta">${bits.join(' · ')}</div></div>
+          <a class="icon-btn flat" href="${setHref('set', set.name)}" aria-label="Edit phrases in ${esc(title)}">${icon('edit')}</a>
         </div>
         <div class="set-actions">
           <a class="btn primary" href="${setHref('listen', set.name)}">${icon('headphones')} Listen</a>
@@ -386,7 +422,32 @@ async function viewListen(name) {
   render();
 }
 
-// ------------------------------------------------------------------ add a phrase
+// ------------------------------------------------------------------ manage a set
+async function viewSet(name) {
+  player.stop();
+  const set = findSet(name);
+  const extra = pendingHtml(name);
+  if (!set && !extra) { location.hash = '#/'; return; }
+  const phrases = set ? set.phrases : [];
+  const rows = phrases.map(p => {
+    const change = pendingFor(p.id);
+    const tag = change ? `<span class="tag">${change.op === 'delete' ? 'Removing…' : 'Updating…'}</span>` : '';
+    return `<li><a class="phrase-row${change ? ' busy' : ''}" href="#/edit/${p.id}">
+      <span class="fr" lang="fr">${esc(p.fr)}</span><span class="en">${esc(p.en)}</span>${tag}</a></li>`;
+  }).join('');
+
+  $view.innerHTML = `
+    <div class="topbar">
+      <a class="icon-btn" href="#/" aria-label="Back">${icon('back')}</a>
+      <h2>${esc(splitSetName(name).title)}</h2><span class="meta">${phrases.length} phrase${phrases.length === 1 ? '' : 's'}</span>
+    </div>
+    ${rows ? `<ul class="panel phrase-list">${rows}</ul>` : ''}
+    <a class="btn wide" href="#/add/${encodeURIComponent(name)}">${icon('plus')} Add a phrase to this set</a>
+    ${extra}
+    <p class="hint center">Tap a phrase to edit, move or delete it.</p>`;
+}
+
+// ------------------------------------------------------------------ add / edit a phrase
 const LAST_SET_KEY = 'repete.add.lastSet';
 
 function newSetName(title) {
@@ -395,68 +456,95 @@ function newSetName(title) {
   return `${String(Math.max(0, ...nums) + 1).padStart(2, '0')} ${title}`;
 }
 
-async function viewAdd() {
-  player.stop();
-  const top = `
-    <div class="topbar">
-      <a class="icon-btn" href="#/" aria-label="Back">${icon('back')}</a>
-      <h2>Add a phrase</h2>
-    </div>`;
-
-  const gh = getGithub();
-  if (!gh) {
-    const guess = data.repo || (location.hostname.endsWith('.github.io')
-      ? `${location.hostname.split('.')[0]}/${location.pathname.split('/')[1]}` : '');
-    $view.innerHTML = `${top}
-      <section class="panel form">
-        <p>To add phrases from here, the app needs a GitHub token that can edit your phrase list. You only do this once per device.</p>
-        <ol>
-          <li>Open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub → New fine-grained token</a>.</li>
-          <li>Repository access: <b>Only select repositories</b> → your Répète repo.</li>
-          <li>Permissions → Repository → <b>Contents: Read and write</b>.</li>
-          <li>Generate it, copy it and paste it below.</li>
-        </ol>
-        <label class="field"><span>Repository</span><input id="repo" value="${esc(guess)}" placeholder="owner/repo" autocapitalize="off" spellcheck="false"></label>
-        <label class="field"><span>Token</span><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…"></label>
-        <button class="btn primary wide" id="connect">Connect</button>
-        <p class="form-err" id="err" role="alert"></p>
-      </section>`;
-    const $btn = $view.querySelector('#connect');
-    $btn.addEventListener('click', async () => {
-      const cfg = { repo: $view.querySelector('#repo').value.trim(), token: $view.querySelector('#token').value.trim() };
-      const $err = $view.querySelector('#err');
-      if (!/^[\w.-]+\/[\w.-]+$/.test(cfg.repo) || !cfg.token) { $err.textContent = 'Fill in both the repository (owner/repo) and the token.'; return; }
-      $btn.disabled = true; $err.textContent = '';
-      try {
-        await checkAccess(cfg);
-        saveGithub(cfg);
-        route();
-      } catch (err) {
-        $err.textContent = err.message;
-        $btn.disabled = false;
-      }
-    });
-    return;
+function findPhrase(id) {
+  for (const set of data.sets) {
+    const p = set.phrases.find(x => x.id === id);
+    if (p) return { p, set: set.name };
   }
+  return null;
+}
+
+function formTop(title, back) {
+  return `
+    <div class="topbar">
+      <a class="icon-btn" href="${back}" aria-label="Back">${icon('back')}</a>
+      <h2>${esc(title)}</h2>
+    </div>`;
+}
+
+function viewConnect(top) {
+  const guess = data.repo || (location.hostname.endsWith('.github.io')
+    ? `${location.hostname.split('.')[0]}/${location.pathname.split('/')[1]}` : '');
+  $view.innerHTML = `${top}
+    <section class="panel form">
+      <p>To change phrases from here, the app needs a GitHub token that can edit your phrase list. You only do this once per device.</p>
+      <ol>
+        <li>Open <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">GitHub → New fine-grained token</a>.</li>
+        <li>Repository access: <b>Only select repositories</b> → your Répète repo.</li>
+        <li>Permissions → Repository → <b>Contents: Read and write</b>.</li>
+        <li>Generate it, copy it and paste it below.</li>
+      </ol>
+      <label class="field"><span>Repository</span><input id="repo" value="${esc(guess)}" placeholder="owner/repo" autocapitalize="off" spellcheck="false"></label>
+      <label class="field"><span>Token</span><input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="github_pat_…"></label>
+      <button class="btn primary wide" id="connect">Connect</button>
+      <p class="form-err" id="err" role="alert"></p>
+    </section>`;
+  const $btn = $view.querySelector('#connect');
+  $btn.addEventListener('click', async () => {
+    const cfg = { repo: $view.querySelector('#repo').value.trim(), token: $view.querySelector('#token').value.trim() };
+    const $err = $view.querySelector('#err');
+    if (!/^[\w.-]+\/[\w.-]+$/.test(cfg.repo) || !cfg.token) { $err.textContent = 'Fill in both the repository (owner/repo) and the token.'; return; }
+    $btn.disabled = true; $err.textContent = '';
+    try {
+      await checkAccess(cfg);
+      saveGithub(cfg);
+      route();
+    } catch (err) {
+      $err.textContent = err.message;
+      $btn.disabled = false;
+    }
+  });
+}
+
+const viewAdd = presetSet => viewPhraseForm(null, presetSet);
+
+async function viewEdit(id) {
+  const found = findPhrase(id);
+  if (!found) { location.hash = '#/'; return; }
+  if (pendingFor(id)) { toast('That phrase is still being updated. Try again in a minute.', null, null, 3000); history.back(); return; }
+  return viewPhraseForm(found);
+}
+
+// Shared form: `existing` is { p, set } when editing, null when adding.
+async function viewPhraseForm(existing, presetSet) {
+  player.stop();
+  const editing = !!existing;
+  const back = editing ? setHref('set', existing.set) : presetSet ? setHref('set', presetSet) : '#/';
+  const top = formTop(editing ? 'Edit phrase' : 'Add a phrase', back);
+  const gh = getGithub();
+  if (!gh) return viewConnect(top);
 
   let lastSet = null;
   try { lastSet = localStorage.getItem(LAST_SET_KEY); } catch { /* private mode */ }
   const names = data.sets.map(s => s.name);
   for (const p of pending) if (!names.includes(p.set)) names.push(p.set); // new sets still on the way
-  const selected = names.includes(lastSet) ? lastSet : names[names.length - 1];
-  let register = '';
+  const selected = editing ? existing.set
+    : [presetSet, lastSet].find(n => names.includes(n)) || names[names.length - 1];
+  const p = existing?.p;
+  // '' = Anyone (vous), 'tu' = A friend, 'auto' = let Claude judge.
+  let register = !editing ? '' : p.notes === 'tu' ? 'tu' : p.notes === 'vous' ? '' : 'auto';
+  const regBtn = (val, label, sub) => `<button type="button" data-reg="${val}" aria-pressed="${register === val}">${label}<small>${sub}</small></button>`;
 
   $view.innerHTML = `${top}
     <section class="panel form">
       <label class="field"><span>English</span>
-        <textarea id="en" rows="2" placeholder="What do you want to be able to say?"></textarea></label>
-      <label class="field"><span>French <small>Optional. Leave it blank and Claude translates it.</small></span>
-        <textarea id="fr" rows="2" lang="fr"></textarea></label>
-      <div class="field"><span>Speaking to</span>
+        <textarea id="en" rows="2" placeholder="What do you want to be able to say?">${esc(p?.en || '')}</textarea></label>
+      <div class="field"><label for="fr">French <small>${editing ? 'Clear it to get a fresh translation from Claude.' : 'Optional. Leave it blank and Claude translates it.'}</small></label>
+        <textarea id="fr" rows="2" lang="fr">${esc(p?.fr || '')}</textarea>
+        ${editing ? '<button type="button" class="link-btn" id="retranslate">Clear and retranslate</button>' : ''}</div>
+      <div class="field"><span>Speaking to <small>Used when Claude translates.</small></span>
         <div class="seg" role="group" aria-label="Formality">
-          <button type="button" data-reg="" aria-pressed="true">Anyone<small>vous</small></button>
-          <button type="button" data-reg="tu">A friend<small>tu</small></button>
-          <button type="button" data-reg="auto">Let Claude<small>pick</small></button>
+          ${regBtn('', 'Anyone', 'vous')}${regBtn('tu', 'A friend', 'tu')}${regBtn('auto', 'Let Claude', 'pick')}
         </div></div>
       <label class="field"><span>Set</span>
         <select id="set">
@@ -464,14 +552,17 @@ async function viewAdd() {
           <option value="">New set…</option>
         </select></label>
       <input id="newset" placeholder="Name of the new set" hidden>
-      <button class="btn primary wide" id="add">Add phrase</button>
+      <button class="btn primary wide" id="save">${editing ? 'Save changes' : 'Add phrase'}</button>
+      ${editing ? '<button class="btn wide danger-btn" id="delete">Delete phrase</button>' : ''}
       <p class="form-err" id="err" role="alert"></p>
-      <p class="hint">Translating and recording takes about a minute. You can keep adding phrases meanwhile.</p>
+      <p class="hint">${editing ? 'Changes' : 'Translating and recording'} take about a minute to appear.${editing ? ' Moving a phrase keeps its flashcard progress.' : ' You can keep adding phrases meanwhile.'}</p>
     </section>
-    <div id="pending">${pendingHtml()}</div>`;
+    <div id="pending">${editing ? '' : pendingHtml()}</div>`;
 
   const $ = sel => $view.querySelector(sel);
-  const $set = $('#set'), $newset = $('#newset'), $btn = $('#add'), $err = $('#err');
+  const $set = $('#set'), $newset = $('#newset'), $save = $('#save'), $err = $('#err');
+  const buttons = [$save, $('#delete')].filter(Boolean);
+  const busy = on => buttons.forEach(b => { b.disabled = on; });
   $set.addEventListener('change', () => { $newset.hidden = $set.value !== ''; if (!$newset.hidden) $newset.focus(); });
   $view.querySelector('.seg').addEventListener('click', e => {
     const b = e.target.closest('[data-reg]');
@@ -479,30 +570,54 @@ async function viewAdd() {
     register = b.dataset.reg;
     $view.querySelectorAll('[data-reg]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
   });
+  $('#retranslate')?.addEventListener('click', () => { $('#fr').value = ''; $('#fr').focus(); });
 
-  $btn.addEventListener('click', async () => {
+  $save.addEventListener('click', async () => {
     const en = $('#en').value.trim().replace(/\s+/g, ' ');
     const fr = $('#fr').value.trim().replace(/\s+/g, ' ');
     const set = $set.value || ($newset.value.trim() && newSetName($newset.value.trim()));
-    if (!en && !fr) { $err.textContent = 'Type the phrase in English (or French).'; return; }
-    if (!set) { $err.textContent = 'Give the new set a name.'; return; }
     // Goes in the CSV's notes column; blank lets Claude judge from the phrase.
     const notes = register === 'tu' ? 'tu' : register === 'auto' ? '' : 'vous';
-    $btn.disabled = true; $err.textContent = '';
+    if (!en && !fr) { $err.textContent = 'Type the phrase in English (or French).'; return; }
+    if (!set) { $err.textContent = 'Give the new set a name.'; return; }
+    if (editing && en === p.en && fr === p.fr && set === existing.set && notes === (p.notes || '')) {
+      location.hash = back; return;
+    }
+    busy(true); $err.textContent = '';
     try {
+      if (editing) {
+        await editPhrase(gh, { en: p.en, fr: p.fr, set: existing.set }, { en, fr, set, notes });
+        await moveProgress(p.id, set, en).catch(err => console.warn('progress not moved', err));
+        addPending({ op: 'edit', en, fr, set, from: p.id });
+        toast('Saved. The change appears in about a minute.', null, null, 3000);
+        location.hash = setHref('set', set);
+        return;
+      }
       await addPhrase(gh, { en, fr, set, notes });
-      pending.push({ en, fr, set, at: Date.now() });
-      savePending();
+      addPending({ op: 'add', en, fr, set });
       try { localStorage.setItem(LAST_SET_KEY, set); } catch { /* private mode */ }
       toast('Added. It will appear in about a minute.', null, null, 3000);
       $('#en').value = ''; $('#fr').value = '';
       if (!$set.value) route(); // re-render so the new set is in the list
       else { $('#pending').innerHTML = pendingHtml(); $('#en').focus(); }
-      pollForBuild();
     } catch (err) {
       $err.textContent = err.message;
     } finally {
-      $btn.disabled = false;
+      busy(false);
+    }
+  });
+
+  $('#delete')?.addEventListener('click', async () => {
+    if (!confirm(`Delete "${p.en || p.fr}"? Its flashcard progress goes too.`)) return;
+    busy(true); $err.textContent = '';
+    try {
+      await deletePhrase(gh, { en: p.en, fr: p.fr, set: existing.set });
+      addPending({ op: 'delete', en: p.en, fr: p.fr, set: existing.set, from: p.id });
+      toast('Deleted. It disappears in about a minute.', null, null, 3000);
+      location.hash = setHref('set', existing.set);
+    } catch (err) {
+      $err.textContent = err.message;
+      busy(false);
     }
   });
 }

@@ -3,3 +3,4 @@ dist/
 .audio-cache-placeholder/
 __pycache__/
 .DS_Store
+.claude/launch.json

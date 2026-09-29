@@ -85,8 +85,10 @@ def ask_claude(items: list[dict]) -> dict[int, str]:
         fail("npx not found: Node.js is needed to run the Claude Code CLI")
 
     prompt = PROMPT + json.dumps(items, ensure_ascii=False, indent=1)
+    # No tools: it only has to answer. A single turn wasn't always enough
+    # (it could spend the turn reaching for a tool), so allow a few.
     cmd = [npx, "-y", "@anthropic-ai/claude-code", "-p", "--output-format", "json",
-           "--model", MODEL, "--max-turns", "1"]
+           "--model", MODEL, "--tools", "", "--max-turns", "3"]
     # Tokens copied from a terminal often pick up a line break where it wrapped.
     env = dict(os.environ)
     for var in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"):

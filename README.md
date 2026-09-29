@@ -114,9 +114,9 @@ Tap **Play** on a set. The phone can go in your pocket.
 - **French only**: each French phrase with a pause to repeat it. Switch to this once you follow the French without the English.
 - **Both**: a round with English, then a round of French only.
 
-Each set remembers its own mode. **Repeat** defaults to **∞**, so it plays on a loop until you stop it; step it down for a fixed number of rounds. **Pause** sets the gap after each French phrase (2 s by default). *Longer pause for longer phrases* adds the phrase's own length to the gap. *Shuffle* reorders every round. *Show French text* can be turned off to train your ear.
+Each set remembers its own mode. **Repeat** defaults to **∞**, so it plays on a loop until you stop it; step it down for a fixed number of rounds. **Pause** sets the gap after each French phrase (2 s by default). *Longer pause for longer phrases* adds the phrase's own length to the gap. *Shuffle* mixes the order each time you open the set. *Show French text* can be turned off to train your ear.
 
-Lock-screen and headphone buttons work: play/pause, next and previous phrase. Everything plays through a single `<audio>` element, and the pauses are real (silent) audio rather than timers. Android throttles timers when the screen is locked, but a page that's playing media stays alive, so the session keeps going.
+Lock-screen and headphone buttons work: play/pause, next and previous phrase. The app stitches a whole round (every clip and pause) into one audio track in memory and loops it, like a music player. Nothing has to run in the page to move from phrase to phrase, so it keeps playing with the screen off.
 
 ### Offline
 

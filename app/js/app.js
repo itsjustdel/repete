@@ -250,7 +250,7 @@ async function viewListen(name) {
       </div>
       <div class="row"><label for="t-scale">Longer pause for longer phrases<small>Adds the phrase's length to the pause</small></label>
         <span class="switch"><input type="checkbox" id="t-scale" data-pref="scale"><span></span></span></div>
-      <div class="row"><label for="t-shuffle">Shuffle</label>
+      <div class="row"><label for="t-shuffle">Shuffle<small>Mixes the order each time you open the set</small></label>
         <span class="switch"><input type="checkbox" id="t-shuffle" data-pref="shuffle"><span></span></span></div>
       <div class="row"><label for="t-text">Show French text<small>Turn off to train your ear</small></label>
         <span class="switch"><input type="checkbox" id="t-text" data-pref="showText"><span></span></span></div>
@@ -291,7 +291,8 @@ async function viewListen(name) {
     }
     const started = player.active || player.i > 0;
     let chip = 'Ready';
-    if (started) {
+    if (player.loading) chip = 'Loading…';
+    else if (started) {
       if (s.kind === 'clip') chip = s.lang === 'en' ? 'English' : s.again ? 'French · again' : 'French';
       else chip = s.purpose === 'think' ? 'In French…' : 'Repeat';
     }
@@ -310,7 +311,7 @@ async function viewListen(name) {
     els.bar.style.width = `${(s.unit / player.units) * 100}%`;
     els.pos.textContent = `Phrase ${s.pos + 1} of ${s.count}`;
     const stage = prefs.mode === 'both' ? `${MODES[s.stage].label} · ` : '';
-    els.loop.textContent = `${stage}round ${s.loop}${prefs.loops ? ` of ${prefs.loops}` : ''}`;
+    els.loop.textContent = `${stage}round ${player.round}${prefs.loops ? ` of ${prefs.loops}` : ''}`;
   }
 
   function rebuild() {
@@ -326,20 +327,23 @@ async function viewListen(name) {
   });
   $view.querySelectorAll('[data-step]').forEach(b => b.addEventListener('click', () => {
     const d = Number(b.dataset.d);
-    if (b.dataset.step === 'pause') prefs.pause = Math.min(15, Math.max(0.5, prefs.pause + d));
-    else {
+    if (b.dataset.step === 'pause') {
+      prefs.pause = Math.min(15, Math.max(0.5, prefs.pause + d));
+      player.refresh();
+    } else {
       // Steps through 1…20 then ∞ (stored as 0), and back down from ∞ to 20.
       const n = prefs.loops || 21;
       const next = Math.min(21, Math.max(1, n + d));
       if (next === n) return;
       prefs.loops = next === 21 ? 0 : next;
-      rebuild();
+      player.updateLoop();
     }
     savePrefs(); renderSettings();
   }));
   $view.querySelectorAll('[data-pref]').forEach(inp => inp.addEventListener('change', () => {
     prefs[inp.dataset.pref] = inp.checked; savePrefs(); renderSettings();
     if (inp.dataset.pref === 'shuffle') rebuild();
+    if (inp.dataset.pref === 'scale') player.refresh();
     if (inp.dataset.pref === 'showText') { player._msKey = null; render(); }
   }));
   els.play.addEventListener('click', () => player.toggle());
